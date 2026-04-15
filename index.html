@@ -1,0 +1,784 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<title>Singapore Property Market Dashboard</title>
+<script src="https://cdn.jsdelivr.net/npm/chart.js@4.4.0/dist/chart.umd.min.js"></script>
+<script src="https://cdn.jsdelivr.net/npm/chartjs-adapter-date-fns@3.0.0/dist/chartjs-adapter-date-fns.bundle.min.js"></script>
+<style>
+  :root {
+    --bg:     #f7f7fb;
+    --card:   #ffffff;
+    --fg:     #1f2937;
+    --muted:  #6b7280;
+    --border: #e5e7eb;
+    --accent: #667eea;
+    --sale:   #4472c4;
+    --rent:   #2ca02c;
+    --good:   #2ca02c;
+    --mid:    #ff9f40;
+    --bad:    #e45756;
+    --shadow: 0 1px 2px rgba(0,0,0,0.04), 0 1px 3px rgba(0,0,0,0.05);
+  }
+  * { box-sizing: border-box; }
+  body {
+    margin: 0; background: var(--bg); color: var(--fg);
+    font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, "Helvetica Neue", sans-serif;
+    font-size: 14px;
+  }
+
+  /* ── header + nav ─────────────────────────────────────────────────────── */
+  header { padding: 32px 32px 8px 32px; text-align: center; }
+  header h1 {
+    margin: 0; font-size: 34px; font-weight: 700; letter-spacing: -0.02em;
+  }
+  header .meta {
+    color: var(--muted); font-size: 13px; margin-top: 4px;
+  }
+  header .meta .badge {
+    background: #fef3c7; color: #92400e; padding: 2px 8px; border-radius: 10px;
+    font-size: 11px; margin-left: 8px;
+  }
+  nav {
+    max-width: 1400px; margin: 16px auto 0 auto;
+    padding: 0 32px; border-bottom: 1px solid var(--border);
+    display: flex; gap: 32px; justify-content: center;
+  }
+  nav button {
+    background: none; border: none; color: var(--muted); cursor: pointer;
+    padding: 14px 0; font-size: 15px; font-weight: 500;
+    border-bottom: 2px solid transparent;
+  }
+  nav button.active { color: var(--accent); border-bottom-color: var(--accent); }
+
+  main { max-width: 1400px; margin: 0 auto; padding: 24px 32px 48px 32px; }
+  .page { display: none; }
+  .page.active { display: block; }
+
+  /* ── KPI band (gradient) ──────────────────────────────────────────────── */
+  .kpi-band {
+    background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+    border-radius: 12px; padding: 20px 24px; margin-bottom: 20px;
+    color: white;
+    display: grid; grid-template-columns: repeat(auto-fit, minmax(120px, 1fr));
+    gap: 16px;
+  }
+  .kpi-band .kpi { text-align: center; }
+  .kpi-band .kpi .value { font-size: 26px; font-weight: 700; line-height: 1.1; }
+  .kpi-band .kpi .label {
+    font-size: 10px; text-transform: uppercase; letter-spacing: 0.08em;
+    color: rgba(255,255,255,0.8); margin-top: 2px;
+  }
+
+  /* ── KPI row (flat cards, used on deep-dive) ─────────────────────────── */
+  .kpi-row {
+    display: grid; grid-template-columns: repeat(auto-fit, minmax(140px, 1fr));
+    gap: 12px; margin-bottom: 20px;
+  }
+  .kpi-row .kpi {
+    background: var(--card); border: 1px solid var(--border);
+    border-radius: 8px; padding: 14px; text-align: center;
+    box-shadow: var(--shadow);
+  }
+  .kpi-row .kpi .label {
+    font-size: 10px; text-transform: uppercase; letter-spacing: 0.08em;
+    color: var(--muted); margin-bottom: 4px;
+  }
+  .kpi-row .kpi .value { font-size: 22px; font-weight: 700; }
+  .kpi-row .kpi .value.blue   { color: var(--sale); }
+  .kpi-row .kpi .value.green  { color: var(--good); }
+  .kpi-row .kpi .value.purple { color: #8b5cf6; }
+  .kpi-row .kpi .value.orange { color: var(--mid); }
+
+  /* ── chart grid + cards ──────────────────────────────────────────────── */
+  .chart-grid {
+    display: grid; gap: 16px;
+    grid-template-columns: repeat(auto-fit, minmax(440px, 1fr));
+  }
+  .chart-grid.three { grid-template-columns: repeat(auto-fit, minmax(340px, 1fr)); }
+  .card {
+    background: var(--card); border: 1px solid var(--border);
+    border-radius: 10px; padding: 18px; box-shadow: var(--shadow);
+  }
+  .card h3 { margin: 0 0 4px 0; font-size: 15px; font-weight: 600; }
+  .card .sub { color: var(--muted); font-size: 11px; margin-bottom: 12px; }
+  .chart-wrap { position: relative; height: 280px; }
+  .chart-wrap.tall { height: 360px; }
+
+  /* ── district chip picker ────────────────────────────────────────────── */
+  .chip-row {
+    display: grid; grid-template-columns: repeat(auto-fit, minmax(44px, 1fr));
+    gap: 4px; margin-bottom: 16px;
+  }
+  .chip {
+    font-size: 11px; padding: 6px 0; text-align: center;
+    border: 1px solid var(--border); background: var(--card);
+    border-radius: 4px; cursor: pointer; color: var(--fg);
+    user-select: none;
+  }
+  .chip:hover { border-color: var(--accent); }
+  .chip.active { background: var(--accent); color: white; border-color: var(--accent); }
+
+  /* ── district table ──────────────────────────────────────────────────── */
+  table { width: 100%; border-collapse: collapse; font-size: 13px; }
+  th, td {
+    padding: 10px 12px; text-align: right; border-bottom: 1px solid var(--border);
+    white-space: nowrap;
+  }
+  th {
+    color: var(--muted); font-weight: 500; cursor: pointer; user-select: none;
+    font-size: 11px; text-transform: uppercase; letter-spacing: 0.04em;
+  }
+  th:first-child, td:first-child,
+  th:nth-child(2), td:nth-child(2) { text-align: left; }
+  th:first-child, td:first-child { font-weight: 600; }
+  tbody tr:hover { background: #f9fafb; }
+  .search-row { margin-bottom: 12px; }
+  .search-row input {
+    border: 1px solid var(--border); padding: 7px 12px; border-radius: 6px;
+    font-size: 13px; width: 220px;
+  }
+  td.yield-good { color: var(--good); font-weight: 600; }
+  td.yield-mid  { color: var(--mid);  font-weight: 600; }
+  td.yield-bad  { color: var(--bad);  font-weight: 600; }
+
+  /* ── methodology text ────────────────────────────────────────────────── */
+  .method {
+    background: var(--card); border: 1px solid var(--border);
+    border-radius: 10px; padding: 28px 32px; box-shadow: var(--shadow);
+    line-height: 1.7; max-width: 900px;
+  }
+  .method h3 { margin: 20px 0 6px 0; font-size: 15px; font-weight: 700; }
+  .method h3:first-child { margin-top: 0; }
+  .method p, .method li { color: #374151; }
+  .method ul { margin: 0; padding-left: 20px; }
+
+  /* ── password gate ───────────────────────────────────────────────── */
+  #auth-gate {
+    position: fixed; inset: 0; z-index: 10000; background: #fff;
+    display: flex; align-items: center; justify-content: center;
+  }
+  #auth-gate .box {
+    text-align: center; font-family: inherit;
+    padding: 40px 48px; border: 1px solid var(--border); border-radius: 8px;
+    box-shadow: 0 10px 40px rgba(0,0,0,0.08);
+  }
+  #auth-gate h2 { margin: 0 0 8px 0; font-size: 20px; font-weight: 600; }
+  #auth-gate p  { margin: 0 0 20px 0; color: var(--muted); font-size: 13px; }
+  #auth-gate input {
+    width: 260px; padding: 10px 12px; font-size: 14px;
+    border: 1px solid var(--border); border-radius: 6px; outline: none;
+  }
+  #auth-gate input:focus { border-color: var(--accent); }
+  #auth-gate button {
+    margin-left: 8px; padding: 10px 18px; font-size: 14px; cursor: pointer;
+    background: var(--accent); color: #fff;
+    border: 0; border-radius: 6px; font-weight: 500;
+  }
+  #auth-gate button:hover { filter: brightness(1.08); }
+  #auth-err { color: #dc2626; font-size: 13px; margin-top: 12px;
+              min-height: 18px; }
+  body.locked { overflow: hidden; }
+  body.locked main, body.locked nav, body.locked header { visibility: hidden; }
+</style>
+</head>
+<body class="locked">
+
+<div id="auth-gate">
+  <div class="box">
+    <h2>Singapore Property Market Dashboard</h2>
+    <p>Restricted access. Please enter the password.</p>
+    <form onsubmit="checkAuth(); return false;">
+      <input type="password" id="auth-pw" autofocus autocomplete="off">
+      <button type="submit">Unlock</button>
+    </form>
+    <div id="auth-err"></div>
+  </div>
+</div>
+<script>
+async function checkAuth() {
+  const pw   = document.getElementById('auth-pw').value;
+  const buf  = new TextEncoder().encode(pw);
+  const hash = await crypto.subtle.digest('SHA-256', buf);
+  const hex  = Array.from(new Uint8Array(hash))
+                 .map(b => b.toString(16).padStart(2,'0')).join('');
+  if (hex === '96869035ed72106a7d2d9eabd7c5b46ca832d3c51a5b2f524c36f224d870eb8b') {
+    document.getElementById('auth-gate').remove();
+    document.body.classList.remove('locked');
+  } else {
+    document.getElementById('auth-err').textContent = 'Incorrect password';
+    document.getElementById('auth-pw').value = '';
+    document.getElementById('auth-pw').focus();
+  }
+}
+</script>
+
+<header>
+  <h1>Singapore Property Market Dashboard</h1>
+  <div class="meta">
+    PropertyGuru Data &middot; 28 Districts &middot; 74,259 active listings
+    &middot; Built 2026-04-15 10:07 UTC
+    <span class="badge">rent: 2026-04-14 · sale: 2026-04-13</span>
+  </div>
+</header>
+
+<nav>
+  <button data-page="overview"  class="active">Market Overview</button>
+  <button data-page="dynamics">Market Dynamics</button>
+  <button data-page="districts">District Analysis</button>
+  <button data-page="deepdive">District Deep-Dive</button>
+  <button data-page="methodology">Methodology</button>
+</nav>
+
+<main>
+
+<!-- ══════════════════════════ MARKET OVERVIEW ════════════════════════════ -->
+<section id="page-overview" class="page active">
+
+  <div class="kpi-band">
+    <div class="kpi"><div class="value" id="kpi-total">—</div><div class="label">Total Listings</div></div>
+    <div class="kpi"><div class="value" id="kpi-sale-n">—</div><div class="label">For Sale</div></div>
+    <div class="kpi"><div class="value" id="kpi-rent-n">—</div><div class="label">For Rent</div></div>
+    <div class="kpi"><div class="value" id="kpi-med-sale">—</div><div class="label">Median Sale Price</div></div>
+    <div class="kpi"><div class="value" id="kpi-med-rent">—</div><div class="label">Median Rent</div></div>
+    <div class="kpi"><div class="value" id="kpi-yield">—</div><div class="label">Gross Rental Yield</div></div>
+    <div class="kpi"><div class="value" id="kpi-med-psf">—</div><div class="label">Median PSF</div></div>
+  </div>
+
+  <div class="chart-grid">
+    <div class="card"><h3>Listings by District</h3><div class="sub">Sale vs Rent</div><div class="chart-wrap"><canvas id="chart-listings-district"></canvas></div></div>
+    <div class="card"><h3>Median Sale Price by District</h3><div class="sub">S$ &middot; shaded by price tier</div><div class="chart-wrap"><canvas id="chart-medsale-district"></canvas></div></div>
+    <div class="card"><h3>Gross Rental Yield vs Median Sale Price</h3><div class="sub">one bubble per district &middot; bubble size = listing count</div><div class="chart-wrap tall"><canvas id="chart-yield-scatter"></canvas></div></div>
+    <div class="card"><h3>Rental Yield by District</h3><div class="sub">% &middot; shaded by yield tier</div><div class="chart-wrap"><canvas id="chart-yield-district"></canvas></div></div>
+  </div>
+
+  <div class="chart-grid three" style="margin-top: 16px;">
+    <div class="card"><h3>Sale Price Distribution</h3><div class="sub">S$</div><div class="chart-wrap"><canvas id="chart-sale-bands"></canvas></div></div>
+    <div class="card"><h3>Rent Distribution</h3><div class="sub">S$ / month</div><div class="chart-wrap"><canvas id="chart-rent-bands"></canvas></div></div>
+    <div class="card"><h3>Property Types (Sale)</h3><div class="sub">count of active listings</div><div class="chart-wrap"><canvas id="chart-ptype"></canvas></div></div>
+  </div>
+
+  <div class="chart-grid three" style="margin-top: 16px;">
+    <div class="card"><h3>Bedroom Distribution</h3><div class="sub">sale &amp; rent</div><div class="chart-wrap"><canvas id="chart-bed"></canvas></div></div>
+    <div class="card"><h3>Median PSF by District (Computed)</h3><div class="sub">price &divide; floor area</div><div class="chart-wrap"><canvas id="chart-psf-district"></canvas></div></div>
+    <div class="card"><h3>Average Price by Property Type</h3><div class="sub">S$ &middot; sale only</div><div class="chart-wrap"><canvas id="chart-avg-ptype"></canvas></div></div>
+  </div>
+
+  <div class="chart-grid" style="margin-top: 16px;">
+    <div class="card"><h3>Top 10 Agencies by Listing Count</h3><div class="sub">across all-time listings (agency name is reliably populated at scrape time)</div><div class="chart-wrap tall"><canvas id="chart-agencies"></canvas></div></div>
+  </div>
+
+</section>
+
+<!-- ══════════════════════════ MARKET DYNAMICS ═══════════════════════════ -->
+<section id="page-dynamics" class="page">
+  <div class="chart-grid">
+    <div class="card"><h3>Daily New Listings</h3><div class="sub">first time a listing was seen (sale vs rent)</div><div class="chart-wrap tall"><canvas id="chart-new"></canvas></div></div>
+    <div class="card"><h3>Active Inventory Over Time</h3><div class="sub">distinct listings sighted that day</div><div class="chart-wrap tall"><canvas id="chart-inv"></canvas></div></div>
+    <div class="card"><h3>Daily Price Cuts</h3><div class="sub">observations where price dropped vs prior record &mdash; a leading indicator of softening</div><div class="chart-wrap tall"><canvas id="chart-cuts"></canvas></div></div>
+    <div class="card"><h3>Median PSF Trajectory</h3><div class="sub">S$/sqft &middot; daily aggregate from price_history</div><div class="chart-wrap tall"><canvas id="chart-psf-ts"></canvas></div></div>
+  </div>
+  <div style="margin-top: 24px; background: #fff7ed; border: 1px solid #fed7aa; border-radius: 8px; padding: 14px 18px; color: #9a3412; font-size: 13px;">
+    <strong>Note on data sparsity:</strong> Time series reflect the scraper's run cadence, not continuous observation.
+    Most days span multiple runs; a few days span none.  These charts become more informative as daily history accumulates.
+  </div>
+</section>
+
+<!-- ══════════════════════════ DISTRICT ANALYSIS ═════════════════════════ -->
+<section id="page-districts" class="page">
+  <div class="search-row"><input id="district-search" placeholder="Search district…"></div>
+  <div class="card">
+    <table id="district-table">
+      <thead><tr>
+        <th data-sort="code">District</th>
+        <th data-sort="text">Area</th>
+        <th data-sort="sale_count">Sale #</th>
+        <th data-sort="rent_count">Rent #</th>
+        <th data-sort="median_sale">Med. Sale Price</th>
+        <th data-sort="median_rent">Med. Rent</th>
+        <th data-sort="median_psf_sale">Med. PSF</th>
+        <th data-sort="gross_yield_pct">Yield %</th>
+        <th data-sort="avg_sale">Avg Sale Price</th>
+      </tr></thead>
+      <tbody></tbody>
+    </table>
+  </div>
+</section>
+
+<!-- ══════════════════════════ DISTRICT DEEP-DIVE ════════════════════════ -->
+<section id="page-deepdive" class="page">
+  <div class="chip-row" id="deepdive-chips"></div>
+
+  <div class="kpi-row" id="deepdive-kpis"></div>
+
+  <div class="chart-grid">
+    <div class="card"><h3 id="dd-rank-title">Median Price Ranking</h3><div class="sub">all districts sorted by median sale price &middot; selection highlighted</div><div class="chart-wrap tall"><canvas id="chart-dd-rank"></canvas></div></div>
+    <div class="card"><h3 id="dd-vs-title">District vs City Median</h3><div class="sub">% of city-wide median</div><div class="chart-wrap tall"><canvas id="chart-dd-vs"></canvas></div></div>
+  </div>
+</section>
+
+<!-- ══════════════════════════ METHODOLOGY ═══════════════════════════════ -->
+<section id="page-methodology" class="page">
+  <div class="method">
+    <h3>Data Source</h3>
+    <p>All data sourced from PropertyGuru Singapore (propertyguru.com.sg), Singapore's largest property listing portal.  Data represents active listings across all 28 URA planning districts.</p>
+
+    <h3>Collection Method</h3>
+    <p>Automated scraping using a browser-based fetcher (nodriver + Chrome) that navigates PropertyGuru search pages and extracts structured listing data from the site's Next.js data layer.  The scraper uses adaptive query splitting (by bedroom count, property type, and price range bisection) to ensure complete coverage within pagination limits.</p>
+
+    <h3>Coverage</h3>
+    <ul id="method-coverage"></ul>
+
+    <h3>Key Metrics</h3>
+    <ul>
+      <li><strong>Median Price:</strong> Middle value of all listing prices &mdash; more robust than mean for skewed distributions.</li>
+      <li><strong>PSF (Price per Square Foot):</strong> Listing price &divide; floor area.  The raw PSF from PropertyGuru is unreliable for some listings; we recompute it from price and floor area.</li>
+      <li><strong>Gross Rental Yield:</strong> (Median Monthly Rent &times; 12) &divide; Median Sale Price &times; 100.  This is a rough indicator &mdash; actual yields vary by unit and exclude costs.</li>
+    </ul>
+
+    <h3>Limitations</h3>
+    <ul>
+      <li>Listing prices are asking prices, not transaction prices &mdash; actual sale/rent amounts may differ.</li>
+      <li>PropertyGuru listings may not capture the full market (private sales, other portals).</li>
+      <li>Cloudflare anti-bot protection occasionally blocks scraping, causing temporary data gaps.</li>
+      <li>Detail enrichment (tenure, furnishing, etc.) is a separate phase still in progress; fields from that phase are <strong>not</strong> shown on this dashboard.</li>
+      <li>Rental yield calculations use district-level medians, not matched unit pairs.</li>
+      <li>Sale and rent are scraped on independent schedules; KPIs reflect each type's most recent full sweep.</li>
+    </ul>
+  </div>
+</section>
+
+</main>
+
+<script>
+const DATA = {"kpis":{"total":74259,"sale":55884,"rent":18375,"med_sale":1700000.0,"med_rent":4600.0,"med_psf":613.5,"avg_sale":3886511.35,"gross_yield_pct":3.25},"property_type_mix":{"Condominium":{"sale":27374,"rent":10872},"HDB":{"sale":14472,"rent":2783},"Apartment":{"sale":4837,"rent":2608},"Semi-Detached":{"sale":2748,"rent":413},"Terrace":{"sale":2559,"rent":409},"Detached":{"sale":1763,"rent":293},"Bungalow":{"sale":1386,"rent":586},"Cluster House":{"sale":534,"rent":177},"Other":{"sale":211,"rent":234}},"bedroom_mix":{"Studio":{"sale":396,"rent":920},"1 BR":{"sale":6000,"rent":3090},"2 BR":{"sale":12509,"rent":5631},"3 BR":{"sale":19954,"rent":5156},"4 BR":{"sale":8287,"rent":2072},"5+ BR":{"sale":8738,"rent":1506}},"sale_bands":{"< $500K":2311,"$500K\u20131M":13431,"$1\u20131.5M":8661,"$1.5\u20132M":7746,"$2\u20133M":7515,"$3\u20135M":5747,"$5\u201310M":5998,"> $10M":4475},"rent_bands":{"< $2K":405,"$2\u20133K":1277,"$3\u20134K":4640,"$4\u20135K":3969,"$5\u20137K":3358,"$7\u201310K":1709,"$10\u201320K":1779,"> $20K":1238},"avg_price_by_property_type":[{"type":"Bungalow","avg":32364082.35,"n":1386},{"type":"Detached","avg":17046779.29,"n":1763},{"type":"Unknown","avg":9853042.62,"n":149},{"type":"Semi-Detached","avg":9015902.39,"n":2748},{"type":"Terrace","avg":6184433.96,"n":2559},{"type":"Shophouse","avg":5239956.79,"n":62},{"type":"Cluster House","avg":4190628.04,"n":534},{"type":"Condominium","avg":2715285.52,"n":27374},{"type":"Apartment","avg":2673857.31,"n":4837},{"type":"HDB","avg":717910.07,"n":14472}],"top_agencies":[{"name":"Propnex Realty","count":36048},{"name":"Era Realty Network","count":17847},{"name":"Huttons Asia","count":9916},{"name":"Orangetee & Tie","count":3949},{"name":"Sri","count":3604},{"name":"Realstar Premier Group","count":1238},{"name":"C & H Properties","count":562},{"name":"Plb Realty","count":528},{"name":"List International Realty","count":269},{"name":"Propseller","count":228}],"districts":[{"code":"D01","text":"Boat Quay / Raffles Place / Marina","sale_count":1153,"rent_count":348,"median_sale":2180000.0,"median_rent":5800.0,"median_psf_sale":805.71,"median_psf_rent":7.03,"avg_sale":3839602.52,"gross_yield_pct":3.19,"pct_with_price_cut_14d":0.33},{"code":"D02","text":"Chinatown / Tanjong Pagar","sale_count":877,"rent_count":445,"median_sale":1500000.0,"median_rent":5200.0,"median_psf_sale":782.12,"median_psf_rent":7.2,"avg_sale":2434475.5,"gross_yield_pct":4.16,"pct_with_price_cut_14d":0.08},{"code":"D03","text":"Alexandra / Commonwealth","sale_count":2255,"rent_count":932,"median_sale":1488000.0,"median_rent":4900.0,"median_psf_sale":663.72,"median_psf_rent":6.97,"avg_sale":1938344.4,"gross_yield_pct":3.95,"pct_with_price_cut_14d":0.56},{"code":"D04","text":"Harbourfront / Telok Blangah","sale_count":1768,"rent_count":418,"median_sale":3635500.0,"median_rent":9000.0,"median_psf_sale":657.83,"median_psf_rent":5.48,"avg_sale":6901877.53,"gross_yield_pct":2.97,"pct_with_price_cut_14d":0.18},{"code":"D05","text":"Buona Vista / West Coast / Clementi New Town","sale_count":2574,"rent_count":1071,"median_sale":1744000.0,"median_rent":4200.0,"median_psf_sale":632.65,"median_psf_rent":5.77,"avg_sale":2087174.52,"gross_yield_pct":2.89,"pct_with_price_cut_14d":0.25},{"code":"D06","text":"City Hall / Clarke Quay","sale_count":189,"rent_count":29,"median_sale":2800000.0,"median_rent":4200.0,"median_psf_sale":3449.94,"median_psf_rent":8.85,"avg_sale":4870345.78,"gross_yield_pct":1.8,"pct_with_price_cut_14d":0.0},{"code":"D07","text":"Beach Road / Bugis / Rochor","sale_count":826,"rent_count":348,"median_sale":1782900.0,"median_rent":4850.0,"median_psf_sale":813.8,"median_psf_rent":8.19,"avg_sale":2520164.5,"gross_yield_pct":3.26,"pct_with_price_cut_14d":0.51},{"code":"D08","text":"Farrer Park / Serangoon Rd","sale_count":811,"rent_count":352,"median_sale":1630000.0,"median_rent":4200.0,"median_psf_sale":732.24,"median_psf_rent":6.06,"avg_sale":1973135.37,"gross_yield_pct":3.09,"pct_with_price_cut_14d":0.17},{"code":"D09","text":"Orchard / River Valley","sale_count":2810,"rent_count":1715,"median_sale":2700000.0,"median_rent":6380.0,"median_psf_sale":2700.71,"median_psf_rent":6.6,"avg_sale":5742403.43,"gross_yield_pct":2.84,"pct_with_price_cut_14d":0.29},{"code":"D10","text":"Tanglin / Holland / Bukit Timah","sale_count":4469,"rent_count":2358,"median_sale":5853000.0,"median_rent":12150.0,"median_psf_sale":808.16,"median_psf_rent":5.8,"avg_sale":11826088.61,"gross_yield_pct":2.49,"pct_with_price_cut_14d":0.21},{"code":"D11","text":"Newton / Novena","sale_count":1867,"rent_count":737,"median_sale":5998000.0,"median_rent":6900.0,"median_psf_sale":2250.47,"median_psf_rent":5.29,"avg_sale":10898718.67,"gross_yield_pct":1.38,"pct_with_price_cut_14d":0.15},{"code":"D12","text":"Balestier / Toa Payoh","sale_count":1829,"rent_count":564,"median_sale":1100000.0,"median_rent":4000.0,"median_psf_sale":634.68,"median_psf_rent":4.9,"avg_sale":1594525.33,"gross_yield_pct":4.36,"pct_with_price_cut_14d":0.67},{"code":"D13","text":"Macpherson / Potong Pasir","sale_count":933,"rent_count":282,"median_sale":1500000.0,"median_rent":4500.0,"median_psf_sale":681.54,"median_psf_rent":5.75,"avg_sale":3761812.05,"gross_yield_pct":3.6,"pct_with_price_cut_14d":0.58},{"code":"D14","text":"Eunos / Geylang / Paya Lebar","sale_count":1568,"rent_count":723,"median_sale":1250000.0,"median_rent":3800.0,"median_psf_sale":658.34,"median_psf_rent":5.97,"avg_sale":1718519.06,"gross_yield_pct":3.65,"pct_with_price_cut_14d":0.35},{"code":"D15","text":"East Coast / Marine Parade","sale_count":4865,"rent_count":1149,"median_sale":3282500.0,"median_rent":5000.0,"median_psf_sale":790.25,"median_psf_rent":5.49,"avg_sale":5304967.28,"gross_yield_pct":1.83,"pct_with_price_cut_14d":0.37},{"code":"D16","text":"Bedok / Upper East Coast","sale_count":2172,"rent_count":598,"median_sale":1650000.0,"median_rent":4000.0,"median_psf_sale":598.36,"median_psf_rent":4.49,"avg_sale":2803620.08,"gross_yield_pct":2.91,"pct_with_price_cut_14d":0.61},{"code":"D17","text":"Changi Airport / Changi Village","sale_count":717,"rent_count":311,"median_sale":1780000.0,"median_rent":3500.0,"median_psf_sale":880.67,"median_psf_rent":3.65,"avg_sale":2963789.73,"gross_yield_pct":2.36,"pct_with_price_cut_14d":1.36},{"code":"D18","text":"Pasir Ris / Tampines","sale_count":3025,"rent_count":707,"median_sale":998800.0,"median_rent":3799.0,"median_psf_sale":603.16,"median_psf_rent":4.28,"avg_sale":1325052.38,"gross_yield_pct":4.56,"pct_with_price_cut_14d":0.64},{"code":"D19","text":"Hougang / Punggol / Sengkang","sale_count":6371,"rent_count":1528,"median_sale":1000000.0,"median_rent":3700.0,"median_psf_sale":654.43,"median_psf_rent":4.42,"avg_sale":2159833.56,"gross_yield_pct":4.44,"pct_with_price_cut_14d":0.53},{"code":"D20","text":"Ang Mo Kio / Bishan / Thomson","sale_count":2113,"rent_count":734,"median_sale":1680000.0,"median_rent":4150.0,"median_psf_sale":706.61,"median_psf_rent":5.38,"avg_sale":2520745.66,"gross_yield_pct":2.96,"pct_with_price_cut_14d":0.6},{"code":"D21","text":"Clementi Park / Upper Bukit Timah","sale_count":1635,"rent_count":497,"median_sale":2600000.0,"median_rent":4900.0,"median_psf_sale":892.65,"median_psf_rent":4.79,"avg_sale":6083495.25,"gross_yield_pct":2.26,"pct_with_price_cut_14d":0.28},{"code":"D22","text":"Boon Lay / Jurong / Tuas","sale_count":1985,"rent_count":610,"median_sale":750000.0,"median_rent":4200.0,"median_psf_sale":534.69,"median_psf_rent":4.48,"avg_sale":1233519.13,"gross_yield_pct":6.72,"pct_with_price_cut_14d":0.54},{"code":"D23","text":"Dairy Farm / Bukit Panjang / Choa Chu Kang","sale_count":3516,"rent_count":787,"median_sale":878000.0,"median_rent":3800.0,"median_psf_sale":571.84,"median_psf_rent":4.07,"avg_sale":1480932.95,"gross_yield_pct":5.19,"pct_with_price_cut_14d":0.81},{"code":"D24","text":"Lim Chu Kang / Tengah","sale_count":218,"rent_count":37,"median_sale":1588000.0,"median_rent":970.0,"median_psf_sale":1877.81,"median_psf_rent":7.61,"avg_sale":1631463.35,"gross_yield_pct":0.73,"pct_with_price_cut_14d":1.57},{"code":"D25","text":"Admiralty / Woodlands","sale_count":1159,"rent_count":283,"median_sale":680000.0,"median_rent":3500.0,"median_psf_sale":546.45,"median_psf_rent":3.51,"avg_sale":1049111.51,"gross_yield_pct":6.18,"pct_with_price_cut_14d":0.42},{"code":"D26","text":"Mandai / Upper Thomson","sale_count":566,"rent_count":90,"median_sale":2955000.0,"median_rent":3600.0,"median_psf_sale":2185.79,"median_psf_rent":3.94,"avg_sale":3557937.24,"gross_yield_pct":1.46,"pct_with_price_cut_14d":0.3},{"code":"D27","text":"Sembawang / Yishun","sale_count":2347,"rent_count":496,"median_sale":780000.0,"median_rent":3500.0,"median_psf_sale":579.34,"median_psf_rent":4.07,"avg_sale":1389765.04,"gross_yield_pct":5.38,"pct_with_price_cut_14d":0.63},{"code":"D28","text":"Seletar / Yio Chu Kang","sale_count":1266,"rent_count":226,"median_sale":2182500.0,"median_rent":3500.0,"median_psf_sale":664.34,"median_psf_rent":4.12,"avg_sale":3207404.61,"gross_yield_pct":1.92,"pct_with_price_cut_14d":0.4}],"daily":{"new_listings":[{"d":"2026-03-26","sale":32413,"rent":16819},{"d":"2026-03-27","sale":6901,"rent":994},{"d":"2026-03-28","sale":2021,"rent":517},{"d":"2026-03-29","sale":1105,"rent":164},{"d":"2026-03-30","sale":8011,"rent":1184},{"d":"2026-03-31","sale":1772,"rent":9},{"d":"2026-04-01","sale":5553,"rent":1208},{"d":"2026-04-03","sale":195,"rent":0},{"d":"2026-04-11","sale":2562,"rent":0},{"d":"2026-04-12","sale":5088,"rent":4045},{"d":"2026-04-13","sale":1144,"rent":594},{"d":"2026-04-14","sale":81,"rent":0}],"active_inventory":[{"d":"2026-03-26","sale":20213,"rent":48},{"d":"2026-03-27","sale":19101,"rent":17765},{"d":"2026-03-30","sale":45065,"rent":20910},{"d":"2026-03-31","sale":29919,"rent":864},{"d":"2026-04-01","sale":34544,"rent":17341},{"d":"2026-04-03","sale":5584,"rent":335},{"d":"2026-04-11","sale":19659,"rent":701},{"d":"2026-04-12","sale":36940,"rent":17950},{"d":"2026-04-13","sale":55909,"rent":18376},{"d":"2026-04-14","sale":8285,"rent":0}],"price_cuts":[{"d":"2026-03-26","sale":0,"rent":0},{"d":"2026-03-27","sale":25,"rent":28},{"d":"2026-03-30","sale":590,"rent":539},{"d":"2026-03-31","sale":154,"rent":10},{"d":"2026-04-01","sale":248,"rent":384},{"d":"2026-04-03","sale":127,"rent":10},{"d":"2026-04-11","sale":1037,"rent":64},{"d":"2026-04-12","sale":1966,"rent":1318},{"d":"2026-04-13","sale":572,"rent":243},{"d":"2026-04-14","sale":46,"rent":0}],"median_psf":[{"d":"2026-03-26","sale":612.35,"rent":5.42},{"d":"2026-03-27","sale":663.27,"rent":5.28},{"d":"2026-03-30","sale":600.36,"rent":5.18},{"d":"2026-03-31","sale":600.19,"rent":7.3},{"d":"2026-04-01","sale":601.12,"rent":5.13},{"d":"2026-04-03","sale":612.87,"rent":5.52},{"d":"2026-04-11","sale":599.4,"rent":5.48},{"d":"2026-04-12","sale":600.39,"rent":5.31},{"d":"2026-04-13","sale":603.47,"rent":5.45},{"d":"2026-04-14","sale":645.07,"rent":null}]},"coverage_bullets":["<strong>Active (reference-run) listings:</strong> 74,259 (55,884 sale + 18,375 rent)","<strong>Districts:</strong> all 28 Singapore planning districts (D01\u2013D28)","<strong>All-time listings in database:</strong> 92,380","<strong>Detail enrichment (Phase 2):</strong> 26,222 listings (28.4%) \u2014 still backfilling; Phase 2 fields are not shown on this dashboard","<strong>Collection period:</strong> 2026-03-26 to 2026-04-14","<strong>Sale/Rent freshness:</strong> rent most recent sweep 2026-04-14 (18,376 sightings) \u00b7 sale most recent sweep 2026-04-13 (55,908 sightings)"]};
+
+// ── formatters ────────────────────────────────────────────────────────────
+const fmtMoney = n => n == null ? '—' : n >= 1e6 ? 'S$' + (n/1e6).toFixed(2) + 'M'
+                                         : n >= 1e3 ? 'S$' + (n/1e3).toFixed(1) + 'K'
+                                                    : 'S$' + Math.round(n);
+const fmtFull  = n => n == null ? '—' : 'S$' + Math.round(n).toLocaleString();
+const fmtPct   = n => n == null ? '—' : n.toFixed(2) + '%';
+const fmtNum   = n => n == null ? '—' : Math.round(n).toLocaleString();
+
+Chart.defaults.color = '#6b7280';
+Chart.defaults.borderColor = '#e5e7eb';
+Chart.defaults.font.family = '-apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif';
+
+const COLORS = {
+  sale: '#4472c4', rent: '#2ca02c',
+  tierGreen: '#2ca02c', tierBlue: '#4472c4', tierOrange: '#ff9f40', tierRed: '#e45756',
+  donut: ['#4472c4','#2ca02c','#9467bd','#ff9f40','#e45756','#17becf','#8c564b','#e377c2'],
+};
+
+function priceTierColor(p) {
+  if (p == null)         return COLORS.tierBlue;
+  if (p >= 5_000_000)    return COLORS.tierRed;
+  if (p >= 2_500_000)    return COLORS.tierOrange;
+  if (p >= 1_500_000)    return COLORS.tierBlue;
+  return COLORS.tierGreen;
+}
+function yieldTierColor(y) {
+  if (y == null)         return COLORS.tierBlue;
+  if (y >= 4)            return COLORS.tierGreen;
+  if (y >= 3)            return COLORS.tierBlue;
+  if (y >= 2)            return COLORS.tierOrange;
+  return COLORS.tierRed;
+}
+function yieldClass(y) {
+  if (y == null)         return '';
+  if (y >= 4)            return 'yield-good';
+  if (y >= 2.5)          return 'yield-mid';
+  return 'yield-bad';
+}
+
+// ── page switching ────────────────────────────────────────────────────────
+document.querySelectorAll('nav button').forEach(btn => {
+  btn.onclick = () => {
+    document.querySelectorAll('nav button').forEach(b => b.classList.remove('active'));
+    document.querySelectorAll('.page').forEach(p => p.classList.remove('active'));
+    btn.classList.add('active');
+    document.getElementById('page-' + btn.dataset.page).classList.add('active');
+  };
+});
+
+// ── KPI band (overview) ───────────────────────────────────────────────────
+function renderKPIs() {
+  const k = DATA.kpis;
+  document.getElementById('kpi-total'   ).textContent = fmtNum(k.total);
+  document.getElementById('kpi-sale-n'  ).textContent = fmtNum(k.sale);
+  document.getElementById('kpi-rent-n'  ).textContent = fmtNum(k.rent);
+  document.getElementById('kpi-med-sale').textContent = fmtMoney(k.med_sale);
+  document.getElementById('kpi-med-rent').textContent = fmtMoney(k.med_rent);
+  document.getElementById('kpi-yield'   ).textContent = fmtPct(k.gross_yield_pct);
+  document.getElementById('kpi-med-psf' ).textContent = k.med_psf == null ? '—' : 'S$' + Math.round(k.med_psf);
+}
+
+// ── chart factory helpers ─────────────────────────────────────────────────
+const charts = {};
+function destroy(id) { if (charts[id]) { charts[id].destroy(); delete charts[id]; } }
+function mkChart(id, cfg) {
+  destroy(id);
+  charts[id] = new Chart(document.getElementById(id), cfg);
+}
+
+// ── Overview charts ───────────────────────────────────────────────────────
+function renderListingsByDistrict() {
+  const ds = [...DATA.districts].filter(d => d.code !== 'Unknown').sort((a,b) => a.code.localeCompare(b.code));
+  const labels = ds.map(d => d.code);
+  mkChart('chart-listings-district', {
+    type: 'bar',
+    data: {
+      labels,
+      datasets: [
+        {label: 'Sale', data: ds.map(d => d.sale_count), backgroundColor: COLORS.sale},
+        {label: 'Rent', data: ds.map(d => d.rent_count), backgroundColor: COLORS.rent},
+      ],
+    },
+    options: {
+      maintainAspectRatio: false,
+      plugins: { legend: { position: 'top', align: 'end' } },
+      scales: { x: {grid:{display:false}, ticks:{font:{size:10}}}, y: {beginAtZero:true, grid:{color:'#f0f1f5'}} },
+    },
+  });
+}
+
+function renderMedSaleByDistrict() {
+  const ds = [...DATA.districts].filter(d => d.code !== 'Unknown' && d.median_sale).sort((a,b) => a.median_sale - b.median_sale);
+  mkChart('chart-medsale-district', {
+    type: 'bar',
+    data: {
+      labels: ds.map(d => d.code),
+      datasets: [{
+        data: ds.map(d => d.median_sale),
+        backgroundColor: ds.map(d => priceTierColor(d.median_sale)),
+      }],
+    },
+    options: {
+      maintainAspectRatio: false,
+      plugins: {
+        legend: {display: false},
+        tooltip: {callbacks: {label: c => fmtFull(c.parsed.y)}},
+      },
+      scales: { x: {grid:{display:false}, ticks:{font:{size:10}}}, y: {beginAtZero:true, grid:{color:'#f0f1f5'},
+                ticks:{callback: v => v >= 1e6 ? (v/1e6).toFixed(1)+'M' : (v/1e3).toFixed(0)+'K'}} },
+    },
+  });
+}
+
+function renderYieldScatter() {
+  const ds = DATA.districts.filter(d => d.code !== 'Unknown' && d.median_sale && d.gross_yield_pct != null);
+  mkChart('chart-yield-scatter', {
+    type: 'bubble',
+    data: {
+      datasets: [{
+        label: 'District',
+        data: ds.map(d => ({
+          x: d.median_sale, y: d.gross_yield_pct,
+          r: Math.min(24, Math.max(4, Math.sqrt((d.sale_count + d.rent_count)) / 3)),
+          code: d.code, text: d.text,
+        })),
+        backgroundColor: 'rgba(68,114,196,0.55)',
+        borderColor: '#4472c4', borderWidth: 1,
+      }],
+    },
+    options: {
+      maintainAspectRatio: false,
+      plugins: {
+        legend: {display: false},
+        tooltip: {callbacks: {
+          label: c => `${c.raw.code} ${c.raw.text}: ${fmtFull(c.raw.x)} · ${c.raw.y.toFixed(2)}%`,
+        }},
+      },
+      scales: {
+        x: {type:'logarithmic', title:{display:true,text:'Median Sale Price (S$, log)'},
+            grid:{color:'#f0f1f5'},
+            ticks:{callback: v => v >= 1e6 ? (v/1e6).toFixed(1)+'M' : (v/1e3).toFixed(0)+'K'}},
+        y: {title:{display:true,text:'Gross Yield (%)'}, grid:{color:'#f0f1f5'}},
+      },
+    },
+  });
+}
+
+function renderYieldByDistrict() {
+  const ds = [...DATA.districts].filter(d => d.code !== 'Unknown' && d.gross_yield_pct != null).sort((a,b) => b.gross_yield_pct - a.gross_yield_pct);
+  mkChart('chart-yield-district', {
+    type: 'bar',
+    data: {
+      labels: ds.map(d => d.code),
+      datasets: [{
+        data: ds.map(d => d.gross_yield_pct),
+        backgroundColor: ds.map(d => yieldTierColor(d.gross_yield_pct)),
+      }],
+    },
+    options: {
+      maintainAspectRatio: false,
+      plugins: {
+        legend: {display: false},
+        tooltip: {callbacks: {label: c => c.parsed.y.toFixed(2) + '%'}},
+      },
+      scales: { x: {grid:{display:false}, ticks:{font:{size:10}}},
+                y: {beginAtZero:true, grid:{color:'#f0f1f5'}, ticks:{callback: v => v + '%'}} },
+    },
+  });
+}
+
+function renderDonut(id, counts) {
+  const labels = Object.keys(counts);
+  const data   = Object.values(counts);
+  mkChart(id, {
+    type: 'doughnut',
+    data: { labels, datasets: [{data, backgroundColor: COLORS.donut, borderColor: '#fff', borderWidth: 2}] },
+    options: {
+      maintainAspectRatio: false,
+      cutout: '55%',
+      plugins: { legend: {position: 'right', labels:{boxWidth: 10, font:{size: 11}}} },
+    },
+  });
+}
+function renderSaleBands() { renderDonut('chart-sale-bands', DATA.sale_bands); }
+function renderRentBands() { renderDonut('chart-rent-bands', DATA.rent_bands); }
+
+function renderPropertyType() {
+  const pts = Object.keys(DATA.property_type_mix);
+  const sale = pts.map(p => DATA.property_type_mix[p].sale);
+  mkChart('chart-ptype', {
+    type: 'bar',
+    data: { labels: pts, datasets: [{data: sale, backgroundColor: COLORS.sale}] },
+    options: {
+      indexAxis: 'y', maintainAspectRatio: false,
+      plugins: { legend: {display: false} },
+      scales: { x: {beginAtZero: true, grid:{color:'#f0f1f5'}}, y: {grid:{display:false}} },
+    },
+  });
+}
+
+function renderBedroom() {
+  const labels = Object.keys(DATA.bedroom_mix);
+  mkChart('chart-bed', {
+    type: 'bar',
+    data: { labels, datasets: [
+      {label: 'Sale', data: labels.map(b => DATA.bedroom_mix[b].sale), backgroundColor: COLORS.sale},
+      {label: 'Rent', data: labels.map(b => DATA.bedroom_mix[b].rent), backgroundColor: COLORS.rent},
+    ]},
+    options: {
+      maintainAspectRatio: false,
+      plugins: { legend: {position:'top', align:'end'} },
+      scales: { x: {grid:{display:false}}, y: {beginAtZero:true, grid:{color:'#f0f1f5'}} },
+    },
+  });
+}
+
+function renderPsfByDistrict() {
+  const ds = [...DATA.districts].filter(d => d.code !== 'Unknown' && d.median_psf_sale).sort((a,b) => a.code.localeCompare(b.code));
+  mkChart('chart-psf-district', {
+    type: 'bar',
+    data: {
+      labels: ds.map(d => d.code),
+      datasets: [{
+        data: ds.map(d => d.median_psf_sale),
+        backgroundColor: ds.map(d => {
+          const p = d.median_psf_sale;
+          if (p >= 2500) return COLORS.tierRed;
+          if (p >= 2000) return COLORS.tierOrange;
+          if (p >= 1500) return COLORS.tierBlue;
+          return COLORS.tierGreen;
+        }),
+      }],
+    },
+    options: {
+      maintainAspectRatio: false,
+      plugins: { legend: {display:false}, tooltip: {callbacks: {label: c => 'S$' + c.parsed.y}}},
+      scales: { x: {grid:{display:false}, ticks:{font:{size:10}}}, y: {beginAtZero:true, grid:{color:'#f0f1f5'}} },
+    },
+  });
+}
+
+function renderAvgByPropertyType() {
+  const d = DATA.avg_price_by_property_type;
+  mkChart('chart-avg-ptype', {
+    type: 'bar',
+    data: { labels: d.map(r => r.type), datasets: [{data: d.map(r => r.avg), backgroundColor: COLORS.sale}]},
+    options: {
+      indexAxis: 'y', maintainAspectRatio: false,
+      plugins: { legend: {display:false}, tooltip: {callbacks: {label: c => fmtFull(c.parsed.x)}}},
+      scales: { x: {beginAtZero:true, grid:{color:'#f0f1f5'}, ticks:{callback: v => v >= 1e6 ? (v/1e6).toFixed(0)+'M' : (v/1e3).toFixed(0)+'K'}}, y: {grid:{display:false}} },
+    },
+  });
+}
+
+function renderAgencies() {
+  const d = DATA.top_agencies;
+  mkChart('chart-agencies', {
+    type: 'bar',
+    data: { labels: d.map(r => r.name), datasets: [{data: d.map(r => r.count), backgroundColor: '#8b5cf6'}]},
+    options: {
+      indexAxis: 'y', maintainAspectRatio: false,
+      plugins: { legend: {display:false}},
+      scales: { x: {beginAtZero:true, grid:{color:'#f0f1f5'}}, y: {grid:{display:false}} },
+    },
+  });
+}
+
+// ── Dynamics charts ───────────────────────────────────────────────────────
+function tsDatasets(rows) {
+  return ['sale','rent'].map(t => ({
+    label: t, borderColor: COLORS[t], backgroundColor: COLORS[t] + '22',
+    data: rows.map(r => ({ x: r.d, y: r[t] })),
+    tension: 0.2, pointRadius: 2.5, fill: false,
+  }));
+}
+function tsChart(id, rows, yLabel) {
+  mkChart(id, {
+    type: 'line',
+    data: { datasets: tsDatasets(rows) },
+    options: {
+      maintainAspectRatio: false,
+      interaction: { mode:'index', intersect: false },
+      plugins: { legend: {position:'top', align:'end'} },
+      scales: {
+        x: {type:'time', time:{unit:'day'}, grid:{display:false}},
+        y: {beginAtZero:true, grid:{color:'#f0f1f5'}, title:{display:!!yLabel, text: yLabel || ''}},
+      },
+    },
+  });
+}
+
+// ── District table ────────────────────────────────────────────────────────
+let sortCol = 'code', sortDir = 1;
+function renderTable() {
+  const filt = document.getElementById('district-search').value.toLowerCase();
+  const rows = DATA.districts.filter(r =>
+    r.code !== 'Unknown' && (!filt || r.code.toLowerCase().includes(filt) || (r.text || '').toLowerCase().includes(filt))
+  );
+  rows.sort((a, b) => {
+    const av = a[sortCol], bv = b[sortCol];
+    if (av == null && bv == null) return 0;
+    if (av == null) return 1;
+    if (bv == null) return -1;
+    if (typeof av === 'string') return av.localeCompare(bv) * sortDir;
+    return (av - bv) * sortDir;
+  });
+  const tbody = document.querySelector('#district-table tbody');
+  tbody.innerHTML = rows.map(r => `<tr>
+    <td>${r.code}</td><td>${r.text || ''}</td>
+    <td>${fmtNum(r.sale_count)}</td>
+    <td>${fmtNum(r.rent_count)}</td>
+    <td>${fmtMoney(r.median_sale)}</td>
+    <td>${fmtMoney(r.median_rent)}</td>
+    <td>${r.median_psf_sale == null ? '—' : 'S$' + Math.round(r.median_psf_sale)}</td>
+    <td class="${yieldClass(r.gross_yield_pct)}">${fmtPct(r.gross_yield_pct)}</td>
+    <td>${fmtMoney(r.avg_sale)}</td>
+  </tr>`).join('');
+}
+document.querySelectorAll('#district-table th').forEach(th => {
+  th.onclick = () => {
+    const col = th.dataset.sort;
+    sortDir = (sortCol === col) ? -sortDir : 1;
+    sortCol = col;
+    renderTable();
+  };
+});
+document.getElementById('district-search').oninput = renderTable;
+
+// ── District Deep-Dive ────────────────────────────────────────────────────
+let selectedDistrict = null;
+
+function renderDeepDive() {
+  const chipRow = document.getElementById('deepdive-chips');
+  const districts = DATA.districts.filter(d => d.code !== 'Unknown').sort((a,b) => a.code.localeCompare(b.code));
+  if (!selectedDistrict && districts.length) selectedDistrict = districts[0].code;
+
+  chipRow.innerHTML = districts.map(d =>
+    `<div class="chip ${d.code === selectedDistrict ? 'active' : ''}" data-code="${d.code}">${d.code}</div>`
+  ).join('');
+  chipRow.querySelectorAll('.chip').forEach(c => c.onclick = () => {
+    selectedDistrict = c.dataset.code; renderDeepDive();
+  });
+
+  const d = districts.find(x => x.code === selectedDistrict) || districts[0];
+
+  document.getElementById('dd-rank-title').textContent = `${d.code}: Median Sale Price Ranking`;
+  document.getElementById('dd-vs-title').textContent   = `${d.code} vs City Median`;
+
+  document.getElementById('deepdive-kpis').innerHTML = [
+    ['Sale Listings',      fmtNum(d.sale_count),          'blue'],
+    ['Rent Listings',      fmtNum(d.rent_count),          'green'],
+    ['Median Sale Price',  fmtMoney(d.median_sale),       ''],
+    ['Median Rent',        fmtMoney(d.median_rent),       ''],
+    ['Median PSF',         d.median_psf_sale == null ? '—' : 'S$' + Math.round(d.median_psf_sale), 'purple'],
+    ['Gross Yield',        fmtPct(d.gross_yield_pct),     'orange'],
+    ['Avg Sale Price',     fmtMoney(d.avg_sale),          'orange'],
+    ['Total Listings',     fmtNum(d.sale_count + d.rent_count), ''],
+  ].map(([lbl, v, cls]) => `<div class="kpi"><div class="label">${lbl}</div><div class="value ${cls}">${v}</div></div>`).join('');
+
+  // Ranking bar chart
+  const rank = [...districts].filter(x => x.median_sale).sort((a,b) => a.median_sale - b.median_sale);
+  mkChart('chart-dd-rank', {
+    type: 'bar',
+    data: {
+      labels: rank.map(x => x.code),
+      datasets: [{
+        data: rank.map(x => x.median_sale),
+        backgroundColor: rank.map(x => x.code === d.code ? COLORS.tierRed : '#d1d5db'),
+      }],
+    },
+    options: {
+      maintainAspectRatio: false,
+      plugins: { legend: {display:false}, tooltip: {callbacks: {label: c => fmtFull(c.parsed.y)}}},
+      scales: { x: {grid:{display:false}, ticks:{font:{size:10}}}, y: {beginAtZero:true, grid:{color:'#f0f1f5'},
+                ticks:{callback: v => v >= 1e6 ? (v/1e6).toFixed(1)+'M' : (v/1e3).toFixed(0)+'K'}} },
+    },
+  });
+
+  // District vs city
+  const city = DATA.kpis;
+  const metrics = [
+    {name: 'Med. Sale',  d: d.median_sale,     c: city.med_sale},
+    {name: 'Med. Rent',  d: d.median_rent,     c: city.med_rent},
+    {name: 'Med. PSF',   d: d.median_psf_sale, c: city.med_psf},
+    {name: 'Yield %',    d: d.gross_yield_pct, c: city.gross_yield_pct},
+  ];
+  mkChart('chart-dd-vs', {
+    type: 'bar',
+    data: {
+      labels: metrics.map(m => m.name),
+      datasets: [
+        {label: d.code,      data: metrics.map(m => m.d && m.c ? m.d / m.c * 100 : null), backgroundColor: COLORS.sale},
+        {label: 'City Median', data: metrics.map(_ => 100),                                backgroundColor: '#d1d5db'},
+      ],
+    },
+    options: {
+      maintainAspectRatio: false,
+      plugins: { legend: {position:'top', align:'end'}, tooltip: {callbacks: {label: c => c.parsed.y == null ? '—' : c.parsed.y.toFixed(0) + '% of city'}}},
+      scales: { x: {grid:{display:false}}, y: {beginAtZero:true, grid:{color:'#f0f1f5'}, ticks:{callback: v => v + '%'}, title:{display:true,text:'% of City Median'}} },
+    },
+  });
+}
+
+// ── Methodology coverage list ─────────────────────────────────────────────
+document.getElementById('method-coverage').innerHTML = DATA.coverage_bullets
+  .map(b => `<li>${b}</li>`).join('');
+
+// ── Initial render ────────────────────────────────────────────────────────
+renderKPIs();
+renderListingsByDistrict();
+renderMedSaleByDistrict();
+renderYieldScatter();
+renderYieldByDistrict();
+renderSaleBands();
+renderRentBands();
+renderPropertyType();
+renderBedroom();
+renderPsfByDistrict();
+renderAvgByPropertyType();
+renderAgencies();
+tsChart('chart-new',    DATA.daily.new_listings,     'listings / day');
+tsChart('chart-inv',    DATA.daily.active_inventory, 'distinct listings sighted');
+tsChart('chart-cuts',   DATA.daily.price_cuts,       'listings with price cut / day');
+tsChart('chart-psf-ts', DATA.daily.median_psf,       'S$/sqft');
+renderTable();
+renderDeepDive();
+</script>
+</body>
+</html>
